@@ -5,19 +5,30 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 
-const s3Endpoint = config.RENDER_EXTERNAL_URL
-  ? `${config.RENDER_EXTERNAL_URL}/s3-proxy`
-  : `http://${config.HOST_IP}:${config.PORT}/s3-proxy`;
-
-// Configure S3 Client pointing to our local s3rver via Express proxy
-const s3Client = new S3Client({
-  endpoint: s3Endpoint,
+// Internal Client: For backend uploading directly to s3rver (bypasses proxy and internet loopback)
+const internalS3Client = new S3Client({
+  endpoint: `http://127.0.0.1:${config.S3_PORT}`,
   region: 'us-east-1',
   credentials: {
     accessKeyId: config.S3_ACCESS_KEY,
     secretAccessKey: config.S3_SECRET_KEY,
   },
-  forcePathStyle: true, // Necessary for local s3rver
+  forcePathStyle: true,
+});
+
+// Public Client: ONLY for generating presigned URLs that the frontend will call
+const publicS3Endpoint = config.RENDER_EXTERNAL_URL
+  ? `${config.RENDER_EXTERNAL_URL}/s3-proxy`
+  : `http://${config.HOST_IP}:${config.PORT}/s3-proxy`;
+
+const publicS3Client = new S3Client({
+  endpoint: publicS3Endpoint,
+  region: 'us-east-1',
+  credentials: {
+    accessKeyId: config.S3_ACCESS_KEY,
+    secretAccessKey: config.S3_SECRET_KEY,
+  },
+  forcePathStyle: true,
 });
 
 function startS3rver() {
@@ -54,10 +65,10 @@ function startS3rver() {
 
 async function ensureBucketExists() {
   try {
-    await s3Client.send(new HeadBucketCommand({ Bucket: config.S3_BUCKET }));
+    await internalS3Client.send(new HeadBucketCommand({ Bucket: config.S3_BUCKET }));
   } catch (error) {
     try {
-      await s3Client.send(new CreateBucketCommand({ Bucket: config.S3_BUCKET }));
+      await internalS3Client.send(new CreateBucketCommand({ Bucket: config.S3_BUCKET }));
       console.log(`[S3rver] Created default bucket: ${config.S3_BUCKET}`);
     } catch (createErr) {
       console.error(`Failed to create bucket ${config.S3_BUCKET}:`, createErr);
@@ -73,7 +84,7 @@ async function uploadToS3(key, buffer, contentType) {
     Body: buffer,
     ContentType: contentType,
   });
-  await s3Client.send(command);
+  await internalS3Client.send(command);
   return key;
 }
 
@@ -82,12 +93,13 @@ async function getPresignedUrl(key, expiresInSeconds = 60) {
     Bucket: config.S3_BUCKET,
     Key: key,
   });
-  return await getSignedUrl(s3Client, command, { expiresIn: expiresInSeconds });
+  return await getSignedUrl(publicS3Client, command, { expiresIn: expiresInSeconds });
 }
 
 module.exports = {
   startS3rver,
   uploadToS3,
   getPresignedUrl,
-  s3Client,
+  internalS3Client,
+  publicS3Client,
 };

@@ -9,21 +9,23 @@ async function testUpload() {
   });
   const token = (await res.json()).token;
   
-  // Upload Media
-  const formData = new FormData();
-  formData.append("title", "Large Image Test");
-  formData.append("price", "50");
   const fs = require('fs');
   const fileBuffer = fs.readFileSync('big.jpg');
-  const blob = new Blob([fileBuffer], { type: 'image/jpeg' });
-  formData.append("image", blob, "big.jpg");
+  const base64String = `data:image/jpeg;base64,${fileBuffer.toString('base64')}`;
   
-  console.log(`Uploading ${fileBuffer.length} bytes...`);
+  console.log(`Uploading ${base64String.length} bytes as Base64 JSON...`);
   try {
     res = await fetch(`${API_URL}/media/upload`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
-      body: formData
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        title: "Large Base64 Test",
+        price: "50",
+        imageBase64: base64String
+      })
     });
     console.log("Status:", res.status);
     console.log("Response:", await res.text());

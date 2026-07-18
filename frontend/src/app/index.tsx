@@ -18,6 +18,7 @@ import {
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 
 const { width } = Dimensions.get('window');
@@ -49,7 +50,6 @@ export default function App() {
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadPrice, setUploadPrice] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [selectedImageBase64, setSelectedImageBase64] = useState<string | null>(null);
   const [uploadLoading, setUploadLoading] = useState(false);
 
   // Wallet States
@@ -274,15 +274,11 @@ export default function App() {
     const pickerResult = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
-      quality: 0.5,
-      base64: true,
+      quality: 0.8,
     });
 
     if (!pickerResult.canceled && pickerResult.assets && pickerResult.assets.length > 0) {
       setSelectedImage(pickerResult.assets[0].uri);
-      if (pickerResult.assets[0].base64) {
-        setSelectedImageBase64(`data:image/jpeg;base64,${pickerResult.assets[0].base64}`);
-      }
     }
   };
 
@@ -301,52 +297,69 @@ export default function App() {
     setUploadLoading(true);
 
     try {
-      let imageBase64 = selectedImageBase64;
-      
-      if (!imageBase64 && Platform.OS === 'web') {
-        // On web, if base64 wasn't available from picker, read blob
+      let isSuccess = false;
+      let errorMsg = 'Failed to upload media';
+
+      if (Platform.OS === 'web') {
+        const formData = new FormData();
+        formData.append('title', uploadTitle);
+        formData.append('price', priceNum.toString());
+
+        const uriParts = selectedImage.split('/');
+        let fileName = uriParts[uriParts.length - 1] || 'upload.jpg';
+
         const responseFile = await fetch(selectedImage);
         const blob = await responseFile.blob();
-        imageBase64 = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
+        formData.append('image', blob, fileName);
+
+        const response = await fetch(`${apiUrl}/media/upload`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/json',
+          },
+          body: formData,
         });
+
+        const data = await response.json();
+        if (response.ok) {
+          isSuccess = true;
+        } else {
+          errorMsg = data.error || errorMsg;
+        }
+      } else {
+        // Ultimate native upload bypassing all Android network bugs
+        const uploadResult = await FileSystem.uploadAsync(`${apiUrl}/media/upload`, selectedImage, {
+          httpMethod: 'POST',
+          uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+          fieldName: 'image',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/json',
+          },
+          parameters: {
+            title: uploadTitle,
+            price: priceNum.toString()
+          }
+        });
+
+        const data = JSON.parse(uploadResult.body);
+        if (uploadResult.status >= 200 && uploadResult.status < 300) {
+          isSuccess = true;
+        } else {
+          errorMsg = data.error || errorMsg;
+        }
       }
 
-      if (!imageBase64) {
-        Alert.alert('Error', 'Could not read image data.');
-        setUploadLoading(false);
-        return;
-      }
-
-      const response = await fetch(`${apiUrl}/media/upload`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-          Accept: 'application/json',
-        },
-        body: JSON.stringify({
-          title: uploadTitle,
-          price: priceNum,
-          imageBase64
-        }),
-      });
-
-      const data = await response.json();
-      if (response.ok) {
+      if (isSuccess) {
         Alert.alert('Success', 'Image published successfully!');
         setSelectedImage(null);
-        setSelectedImageBase64(null);
         setUploadTitle('');
         setUploadPrice('');
-        setSelectedImage(null);
         setCurrentScreen('feed');
-        fetchFeed();
+        fetchFeed(token || '', apiUrl);
       } else {
-        Alert.alert('Error', data.error || 'Failed to upload media');
+        Alert.alert('Error', errorMsg);
       }
     } catch (err: any) {
       console.error(err);

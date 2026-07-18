@@ -87,18 +87,27 @@ export default function App() {
           Accept: 'application/json',
         },
       });
-      const data = await response.json();
+      
       if (response.ok) {
+        const data = await response.json();
         setUser(data.user);
         setCurrentScreen('feed');
         fetchFeed(authToken, url);
-      } else {
-        // Token might have expired
+      } else if (response.status === 401 || response.status === 403) {
+        // Token actually expired or invalid
         handleLogout();
+      } else {
+        // Some other server error, don't logout
+        Alert.alert('Server Error', 'Could not load profile. The server might be waking up.');
       }
     } catch (err) {
       console.error(err);
-      handleLogout();
+      // Network error (timeout because Render is waking up). DO NOT LOGOUT!
+      Alert.alert(
+        'Connection Timeout', 
+        'The server is waking up from sleep. Please wait a minute and pull to refresh, or try logging in again.'
+      );
+      // We don't call handleLogout() here so the token is preserved!
     }
   };
 

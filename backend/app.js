@@ -3,10 +3,10 @@ const cors = require('cors');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const { createProxyMiddleware } = require('http-proxy-middleware');
-const bcrypt = require('bcryptjs');
 const config = require('./config');
-const { sequelize, User } = require('./config/db');
+const { sequelize } = require('./config/db');
 const { startS3rver } = require('./services/s3Service');
+const seedDatabase = require('./seeder');
 const router = require('./routes');
 
 const app = express();
@@ -64,15 +64,8 @@ async function start() {
     await sequelize.sync({ force: false });
     console.log('[Database] SQLite synced successfully.');
 
-    // 4. Seed Demo Accounts
-    const passwordHash = await bcrypt.hash('password123', 10);
-    for (const username of ['seller', 'buyer']) {
-      const existing = await User.findOne({ where: { username } });
-      if (!existing) {
-        await User.create({ username, passwordHash, walletBalance: 1000 });
-        console.log(`[Database] Seeded demo account: ${username}`);
-      }
-    }
+    // 4. Seed Database and Demo Media
+    await seedDatabase();
   } catch (error) {
     console.error('Fatal initialization error:', error);
     process.exit(1);

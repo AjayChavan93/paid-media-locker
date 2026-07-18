@@ -49,6 +49,7 @@ export default function App() {
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadPrice, setUploadPrice] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedImageBase64, setSelectedImageBase64] = useState<string | null>(null);
   const [uploadLoading, setUploadLoading] = useState(false);
 
   // Wallet States
@@ -279,8 +280,9 @@ export default function App() {
 
     if (!pickerResult.canceled && pickerResult.assets && pickerResult.assets.length > 0) {
       setSelectedImage(pickerResult.assets[0].uri);
-      // We can also store the base64 string on the component, or we can just read it later.
-      // But let's just fetch the base64 or pass it directly. Actually, the easiest way is to fetch it.
+      if (pickerResult.assets[0].base64) {
+        setSelectedImageBase64(`data:image/jpeg;base64,${pickerResult.assets[0].base64}`);
+      }
     }
   };
 
@@ -299,9 +301,10 @@ export default function App() {
     setUploadLoading(true);
 
     try {
-      let imageBase64 = '';
-      if (Platform.OS === 'web') {
-        // On web, we read the blob and convert to base64
+      let imageBase64 = selectedImageBase64;
+      
+      if (!imageBase64 && Platform.OS === 'web') {
+        // On web, if base64 wasn't available from picker, read blob
         const responseFile = await fetch(selectedImage);
         const blob = await responseFile.blob();
         imageBase64 = await new Promise((resolve, reject) => {
@@ -310,18 +313,12 @@ export default function App() {
           reader.onerror = reject;
           reader.readAsDataURL(blob);
         });
-      } else {
-        // On Android/iOS, Expo FileSystem can read the base64 quickly
-        // Since we didn't save base64 to state, we fetch it if possible, but FileSystem is best.
-        // If we don't have FileSystem, we can just use fetch().blob() and FileReader!
-        const responseFile = await fetch(selectedImage);
-        const blob = await responseFile.blob();
-        imageBase64 = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-        });
+      }
+
+      if (!imageBase64) {
+        Alert.alert('Error', 'Could not read image data.');
+        setUploadLoading(false);
+        return;
       }
 
       const response = await fetch(`${apiUrl}/media/upload`, {
@@ -340,7 +337,9 @@ export default function App() {
 
       const data = await response.json();
       if (response.ok) {
-        Alert.alert('Success', 'Media published successfully!');
+        Alert.alert('Success', 'Image published successfully!');
+        setSelectedImage(null);
+        setSelectedImageBase64(null);
         setUploadTitle('');
         setUploadPrice('');
         setSelectedImage(null);

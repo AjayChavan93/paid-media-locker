@@ -13,6 +13,7 @@ import {
   StatusBar,
   Modal,
   Dimensions,
+  Platform,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -194,7 +195,6 @@ export default function App() {
     }
   };
 
-  // API Call: Unlock Content
   const handleUnlockMedia = async (mediaId: number, price: number) => {
     if (!token || !user) return;
     if (user.walletBalance < price) {
@@ -202,53 +202,55 @@ export default function App() {
       return;
     }
 
-    Alert.alert(
-      'Confirm Purchase',
-      `Unlock this image for ${price} coins?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Unlock',
-          onPress: async () => {
-            try {
-              const response = await fetch(`${apiUrl}/media/${mediaId}/unlock`, {
-                method: 'POST',
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                  Accept: 'application/json',
-                },
-              });
-              const data = await response.json();
-              if (response.ok) {
-                Alert.alert('Success', 'Content unlocked!');
-                setUser({ ...user, walletBalance: data.newBalance });
-                
-                // Refresh the item details by reloading the feed
-                await fetchFeed();
-                
-                // Update selectedMedia in detail screen
-                const updatedItem = feed.find(item => item.id === mediaId);
-                if (updatedItem) {
-                  // Refetch the feed item details or update local screen state
-                  const resFeed = await fetch(`${apiUrl}/media/feed`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                  });
-                  const resData = await resFeed.json();
-                  if (resFeed.ok) {
-                    const refreshedItem = resData.feed.find((item: any) => item.id === mediaId);
-                    if (refreshedItem) setSelectedMedia(refreshedItem);
-                  }
-                }
-              } else {
-                Alert.alert('Error', data.error || 'Failed to unlock media');
-              }
-            } catch (err) {
-              Alert.alert('Error', 'Connection failed during unlock process');
-            }
+    const processUnlock = async () => {
+      try {
+        const response = await fetch(`${apiUrl}/media/${mediaId}/unlock`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/json',
           },
-        },
-      ]
-    );
+        });
+        const data = await response.json();
+        if (response.ok) {
+          Alert.alert('Success', 'Content unlocked!');
+          setUser({ ...user, walletBalance: data.newBalance });
+          
+          // Refresh the item details by reloading the feed
+          await fetchFeed();
+          
+          // Update selectedMedia in detail screen
+          const resFeed = await fetch(`${apiUrl}/media/feed`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          const resData = await resFeed.json();
+          if (resFeed.ok) {
+            const refreshedItem = resData.feed.find((item: any) => item.id === mediaId);
+            if (refreshedItem) setSelectedMedia(refreshedItem);
+          }
+        } else {
+          Alert.alert('Error', data.error || 'Failed to unlock media');
+        }
+      } catch (err) {
+        Alert.alert('Error', 'Connection failed during unlock process');
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(`Confirm Purchase: Unlock this image for ${price} coins?`);
+      if (confirmed) {
+        processUnlock();
+      }
+    } else {
+      Alert.alert(
+        'Confirm Purchase',
+        `Unlock this image for ${price} coins?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Unlock', onPress: processUnlock },
+        ]
+      );
+    }
   };
 
   // API Call: Upload Media
@@ -283,22 +285,33 @@ export default function App() {
     }
 
     setUploadLoading(true);
-    const formData = new FormData();
-    formData.append('title', uploadTitle);
-    formData.append('price', priceNum.toString());
-
-    // Extract filename and file type from URI
-    const uriParts = selectedImage.split('/');
-    const fileName = uriParts[uriParts.length - 1];
-    const fileType = fileName.split('.').pop() || 'jpg';
-
-    formData.append('image', {
-      uri: selectedImage,
-      name: fileName,
-      type: `image/${fileType === 'png' ? 'png' : 'jpeg'}`,
-    } as any);
 
     try {
+      const formData = new FormData();
+      formData.append('title', uploadTitle);
+      formData.append('price', priceNum.toString());
+
+      // Extract filename and file type from URI
+      const uriParts = selectedImage.split('/');
+      let fileName = uriParts[uriParts.length - 1];
+      if (!fileName || !fileName.includes('.')) {
+        fileName = 'upload.jpg';
+      }
+
+      // Cross-platform reliable file upload approach (Web + Native)
+      if (Platform.OS === 'web') {
+        const responseFile = await fetch(selectedImage);
+        const blob = await responseFile.blob();
+        formData.append('image', blob, fileName);
+      } else {
+        const fileType = fileName.split('.').pop() || 'jpg';
+        formData.append('image', {
+          uri: selectedImage,
+          name: fileName,
+          type: `image/${fileType.toLowerCase() === 'png' ? 'png' : 'jpeg'}`,
+        } as any);
+      }
+
       const response = await fetch(`${apiUrl}/media/upload`, {
         method: 'POST',
         headers: {

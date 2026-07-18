@@ -273,11 +273,14 @@ export default function App() {
     const pickerResult = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
-      quality: 0.8,
+      quality: 0.5,
+      base64: true,
     });
 
     if (!pickerResult.canceled && pickerResult.assets && pickerResult.assets.length > 0) {
       setSelectedImage(pickerResult.assets[0].uri);
+      // We can also store the base64 string on the component, or we can just read it later.
+      // But let's just fetch the base64 or pass it directly. Actually, the easiest way is to fetch it.
     }
   };
 
@@ -296,38 +299,43 @@ export default function App() {
     setUploadLoading(true);
 
     try {
-      const formData = new FormData();
-      formData.append('title', uploadTitle);
-      formData.append('price', priceNum.toString());
-
-      // Extract filename and file type from URI
-      const uriParts = selectedImage.split('/');
-      let fileName = uriParts[uriParts.length - 1];
-      if (!fileName || !fileName.includes('.')) {
-        fileName = 'upload.jpg';
-      }
-
-      // Cross-platform reliable file upload approach (Web + Native)
+      let imageBase64 = '';
       if (Platform.OS === 'web') {
+        // On web, we read the blob and convert to base64
         const responseFile = await fetch(selectedImage);
         const blob = await responseFile.blob();
-        formData.append('image', blob, fileName);
+        imageBase64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
       } else {
-        const fileType = fileName.split('.').pop() || 'jpg';
-        formData.append('image', {
-          uri: selectedImage,
-          name: fileName,
-          type: `image/${fileType.toLowerCase() === 'png' ? 'png' : 'jpeg'}`,
-        } as any);
+        // On Android/iOS, Expo FileSystem can read the base64 quickly
+        // Since we didn't save base64 to state, we fetch it if possible, but FileSystem is best.
+        // If we don't have FileSystem, we can just use fetch().blob() and FileReader!
+        const responseFile = await fetch(selectedImage);
+        const blob = await responseFile.blob();
+        imageBase64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
       }
 
       const response = await fetch(`${apiUrl}/media/upload`, {
         method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
           Accept: 'application/json',
         },
-        body: formData,
+        body: JSON.stringify({
+          title: uploadTitle,
+          price: priceNum,
+          imageBase64
+        }),
       });
 
       const data = await response.json();

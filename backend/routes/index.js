@@ -106,10 +106,27 @@ router.get('/auth/me', auth, async (req, res) => {
 // Upload Media
 router.post('/media/upload', auth, upload.single('image'), async (req, res) => {
   try {
-    const { title, price } = req.body;
-    const file = req.file;
+    const { title, price, imageBase64 } = req.body;
+    let fileBuffer;
+    let mimetype = 'image/jpeg';
+    let fileExtension = 'jpg';
 
-    if (!title || !price || !file) {
+    if (req.file) {
+      fileBuffer = req.file.buffer;
+      mimetype = req.file.mimetype;
+      fileExtension = req.file.originalname.split('.').pop() || 'jpg';
+    } else if (imageBase64) {
+      const matches = imageBase64.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      if (matches && matches.length === 3) {
+        mimetype = matches[1];
+        fileBuffer = Buffer.from(matches[2], 'base64');
+      } else {
+        fileBuffer = Buffer.from(imageBase64, 'base64');
+      }
+      if (mimetype === 'image/png') fileExtension = 'png';
+    }
+
+    if (!title || !price || !fileBuffer) {
       return res.status(400).json({ error: 'Title, price, and image file are required' });
     }
 
@@ -121,7 +138,7 @@ router.post('/media/upload', auth, upload.single('image'), async (req, res) => {
     // Process image to generate preview using Jimp (resizing and blurring)
     let previewBuffer;
     try {
-      const jimpImage = await Jimp.read(file.buffer);
+      const jimpImage = await Jimp.read(fileBuffer);
       // Resize to 400px width (maintain aspect ratio) and apply blur
       jimpImage.resize(400, Jimp.AUTO).blur(20);
       previewBuffer = await jimpImage.getBufferAsync(Jimp.MIME_JPEG);
@@ -131,13 +148,12 @@ router.post('/media/upload', auth, upload.single('image'), async (req, res) => {
     }
 
     // Generate unique S3 keys
-    const fileExtension = file.originalname.split('.').pop() || 'jpg';
     const uniqueId = crypto.randomUUID();
     const originalKey = `media/original/${uniqueId}.${fileExtension}`;
     const previewKey = `media/preview/${uniqueId}.jpg`;
 
     // Upload files to S3
-    await uploadToS3(originalKey, file.buffer, file.mimetype);
+    await uploadToS3(originalKey, fileBuffer, mimetype);
     await uploadToS3(previewKey, previewBuffer, 'image/jpeg');
 
     // Save metadata in database

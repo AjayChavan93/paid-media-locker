@@ -348,8 +348,9 @@ export default function App() {
       } else {
         Alert.alert('Error', data.error || 'Failed to upload media');
       }
-    } catch (err) {
-      Alert.alert('Error', 'Connection failed during upload');
+    } catch (err: any) {
+      console.error(err);
+      Alert.alert('Upload Failed', err.message || 'An unknown error occurred during upload.');
     } finally {
       setUploadLoading(false);
     }
